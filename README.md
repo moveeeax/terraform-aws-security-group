@@ -9,7 +9,7 @@ set inline without touching the resource.
 
 ```hcl
 module "security_group" {
-  source = "github.com/cybercapybara/terraform-aws-security-group"
+  source = "github.com/moveeeax/terraform-aws-security-group"
 
   name   = "web-sg"
   vpc_id = "vpc-0abc123"
