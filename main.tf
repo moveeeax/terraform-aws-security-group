@@ -1,3 +1,28 @@
+locals {
+  # Protocol values for which from_port/to_port really are TCP/UDP port numbers.
+  # For icmp and friends those fields carry type/code instead, so the port guard
+  # below must not treat them as ports.
+  port_based_protocols = ["tcp", "6", "udp", "17"]
+
+  # Protocol values that mean "every protocol on every port".
+  all_protocols = ["-1", "all"]
+
+  # Ingress rules that would open a guarded port to the entire internet. A CIDR
+  # with a /0 prefix (0.0.0.0/0, ::/0) covers every address, so it is the marker
+  # for "unrestricted".
+  public_guarded_ingress = [
+    for rule in var.ingress_rules :
+    format("%s %d-%d from %s", rule.protocol, rule.from_port, rule.to_port, join(",", rule.cidr_blocks))
+    if length(var.guarded_ingress_ports) > 0 &&
+    anytrue([for cidr in rule.cidr_blocks : endswith(cidr, "/0")]) && (
+      contains(local.all_protocols, lower(rule.protocol)) || (
+        contains(local.port_based_protocols, lower(rule.protocol)) &&
+        anytrue([for port in var.guarded_ingress_ports : port >= rule.from_port && port <= rule.to_port])
+      )
+    )
+  ]
+}
+
 resource "aws_security_group" "this" {
   name        = var.name
   description = var.description
@@ -26,4 +51,16 @@ resource "aws_security_group" "this" {
   }
 
   tags = merge({ Name = var.name }, var.tags)
+
+  lifecycle {
+    precondition {
+      condition = var.allow_public_guarded_ingress || length(local.public_guarded_ingress) == 0
+      error_message = join(" ", [
+        "Refusing to expose a guarded port to an unrestricted CIDR.",
+        "Offending ingress rules: ${join("; ", local.public_guarded_ingress)}.",
+        "Narrow cidr_blocks to the networks that actually need access, remove the port from",
+        "guarded_ingress_ports, or set allow_public_guarded_ingress = true to accept the exposure.",
+      ])
+    }
+  }
 }
