@@ -75,14 +75,48 @@ run "rejects_world_open_rdp_via_ipv6" {
 
   variables {
     ingress_rules = [{
-      from_port   = 3389
-      to_port     = 3389
-      protocol    = "tcp"
-      cidr_blocks = ["::/0"]
+      from_port        = 3389
+      to_port          = 3389
+      protocol         = "tcp"
+      ipv6_cidr_blocks = ["::/0"]
     }]
   }
 
   expect_failures = [aws_security_group.this]
+}
+
+run "rejects_guarded_port_open_to_mixed_ipv4_and_ipv6" {
+  command = plan
+
+  variables {
+    ingress_rules = [{
+      description      = "SSH from a private IPv4 range but wide open over IPv6"
+      from_port        = 22
+      to_port          = 22
+      protocol         = "tcp"
+      cidr_blocks      = ["10.0.0.0/8"]
+      ipv6_cidr_blocks = ["::/0"]
+    }]
+  }
+
+  expect_failures = [aws_security_group.this]
+}
+
+run "allows_guarded_port_from_a_private_ipv6_cidr" {
+  variables {
+    ingress_rules = [{
+      description      = "SSH from an internal IPv6 range"
+      from_port        = 22
+      to_port          = 22
+      protocol         = "tcp"
+      ipv6_cidr_blocks = ["fd00::/8"]
+    }]
+  }
+
+  assert {
+    condition     = length(aws_security_group.this.ingress) == 1
+    error_message = "A guarded port restricted to a private IPv6 CIDR must be accepted."
+  }
 }
 
 run "rejects_guarded_port_inside_a_wide_range" {
@@ -209,7 +243,7 @@ run "rejects_ingress_rule_without_a_source" {
 
   variables {
     ingress_rules = [{
-      description = "No cidr_blocks at all"
+      description = "Neither cidr_blocks nor ipv6_cidr_blocks set"
       from_port   = 443
       to_port     = 443
       protocol    = "tcp"
@@ -217,6 +251,23 @@ run "rejects_ingress_rule_without_a_source" {
   }
 
   expect_failures = [var.ingress_rules]
+}
+
+run "accepts_ingress_rule_with_only_an_ipv6_source" {
+  variables {
+    ingress_rules = [{
+      description      = "HTTPS over IPv6 only, no cidr_blocks at all"
+      from_port        = 443
+      to_port          = 443
+      protocol         = "tcp"
+      ipv6_cidr_blocks = ["2001:db8::/32"]
+    }]
+  }
+
+  assert {
+    condition     = length(aws_security_group.this.ingress) == 1
+    error_message = "A rule that supplies only ipv6_cidr_blocks must be accepted; ipv6_cidr_blocks is a valid source on its own."
+  }
 }
 
 run "rejects_inverted_ingress_port_range" {
@@ -262,5 +313,23 @@ run "rejects_egress_rule_without_a_destination" {
   }
 
   expect_failures = [var.egress_rules]
+}
+
+run "accepts_egress_rule_with_only_an_ipv6_destination" {
+  variables {
+    egress_rules = [{
+      description      = "Egress restricted to an internal IPv6 range only"
+      from_port        = 0
+      to_port          = 0
+      protocol         = "-1"
+      cidr_blocks      = []
+      ipv6_cidr_blocks = ["fd00::/8"]
+    }]
+  }
+
+  assert {
+    condition     = length(aws_security_group.this.egress) == 1
+    error_message = "An egress rule that supplies only ipv6_cidr_blocks must be accepted."
+  }
 }
 
