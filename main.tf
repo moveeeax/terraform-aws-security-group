@@ -9,12 +9,13 @@ locals {
 
   # Ingress rules that would open a guarded port to the entire internet. A CIDR
   # with a /0 prefix (0.0.0.0/0, ::/0) covers every address, so it is the marker
-  # for "unrestricted".
+  # for "unrestricted". Both IPv4 (cidr_blocks) and IPv6 (ipv6_cidr_blocks)
+  # sources are checked; either one alone is enough to trigger the guard.
   public_guarded_ingress = [
     for rule in var.ingress_rules :
-    format("%s %d-%d from %s", rule.protocol, rule.from_port, rule.to_port, join(",", rule.cidr_blocks))
+    format("%s %d-%d from %s", rule.protocol, rule.from_port, rule.to_port, join(",", concat(rule.cidr_blocks, rule.ipv6_cidr_blocks)))
     if length(var.guarded_ingress_ports) > 0 &&
-    anytrue([for cidr in rule.cidr_blocks : endswith(cidr, "/0")]) && (
+    anytrue([for cidr in concat(rule.cidr_blocks, rule.ipv6_cidr_blocks) : endswith(cidr, "/0")]) && (
       contains(local.all_protocols, lower(rule.protocol)) || (
         contains(local.port_based_protocols, lower(rule.protocol)) &&
         anytrue([for port in var.guarded_ingress_ports : port >= rule.from_port && port <= rule.to_port])
@@ -31,22 +32,24 @@ resource "aws_security_group" "this" {
   dynamic "ingress" {
     for_each = var.ingress_rules
     content {
-      description = ingress.value.description
-      from_port   = ingress.value.from_port
-      to_port     = ingress.value.to_port
-      protocol    = ingress.value.protocol
-      cidr_blocks = ingress.value.cidr_blocks
+      description      = ingress.value.description
+      from_port        = ingress.value.from_port
+      to_port          = ingress.value.to_port
+      protocol         = ingress.value.protocol
+      cidr_blocks      = ingress.value.cidr_blocks
+      ipv6_cidr_blocks = ingress.value.ipv6_cidr_blocks
     }
   }
 
   dynamic "egress" {
     for_each = var.egress_rules
     content {
-      description = egress.value.description
-      from_port   = egress.value.from_port
-      to_port     = egress.value.to_port
-      protocol    = egress.value.protocol
-      cidr_blocks = egress.value.cidr_blocks
+      description      = egress.value.description
+      from_port        = egress.value.from_port
+      to_port          = egress.value.to_port
+      protocol         = egress.value.protocol
+      cidr_blocks      = egress.value.cidr_blocks
+      ipv6_cidr_blocks = egress.value.ipv6_cidr_blocks
     }
   }
 

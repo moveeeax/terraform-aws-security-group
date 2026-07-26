@@ -17,17 +17,18 @@ variable "vpc_id" {
 variable "ingress_rules" {
   description = "List of ingress rules to apply to the security group. Defaults to no ingress at all."
   type = list(object({
-    description = optional(string, "")
-    from_port   = number
-    to_port     = number
-    protocol    = string
-    cidr_blocks = optional(list(string), [])
+    description      = optional(string, "")
+    from_port        = number
+    to_port          = number
+    protocol         = string
+    cidr_blocks      = optional(list(string), [])
+    ipv6_cidr_blocks = optional(list(string), [])
   }))
   default = []
 
   validation {
-    condition     = alltrue([for rule in var.ingress_rules : length(rule.cidr_blocks) > 0])
-    error_message = "Every ingress rule must list at least one entry in cidr_blocks; this module exposes no other source type, and a rule without a source is rejected by the EC2 API."
+    condition     = alltrue([for rule in var.ingress_rules : length(rule.cidr_blocks) + length(rule.ipv6_cidr_blocks) > 0])
+    error_message = "Every ingress rule must list at least one entry in cidr_blocks or ipv6_cidr_blocks; this module exposes no other source type, and a rule without a source is rejected by the EC2 API."
   }
 
   # Only TCP and UDP rules carry real port numbers. For icmp/icmpv6 these fields
@@ -45,11 +46,12 @@ variable "ingress_rules" {
 variable "egress_rules" {
   description = "List of egress rules to apply to the security group. Defaults to allowing all outbound traffic, matching the behaviour of a security group created outside this module. Pass an explicit list to restrict it, or [] to allow no egress at all."
   type = list(object({
-    description = optional(string, "")
-    from_port   = number
-    to_port     = number
-    protocol    = string
-    cidr_blocks = optional(list(string), ["0.0.0.0/0"])
+    description      = optional(string, "")
+    from_port        = number
+    to_port          = number
+    protocol         = string
+    cidr_blocks      = optional(list(string), ["0.0.0.0/0"])
+    ipv6_cidr_blocks = optional(list(string), [])
   }))
   default = [{
     description = "Allow all outbound traffic"
@@ -60,8 +62,8 @@ variable "egress_rules" {
   }]
 
   validation {
-    condition     = alltrue([for rule in var.egress_rules : length(rule.cidr_blocks) > 0])
-    error_message = "Every egress rule must list at least one entry in cidr_blocks; this module exposes no other destination type, and a rule without a destination is rejected by the EC2 API."
+    condition     = alltrue([for rule in var.egress_rules : length(rule.cidr_blocks) + length(rule.ipv6_cidr_blocks) > 0])
+    error_message = "Every egress rule must list at least one entry in cidr_blocks or ipv6_cidr_blocks; this module exposes no other destination type, and a rule without a destination is rejected by the EC2 API."
   }
 
   validation {
