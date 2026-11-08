@@ -54,7 +54,51 @@ ingress_rules = [
 ]
 ```
 
-A rule needs at least one entry across the two fields; both default to `[]`.
+Both fields default to `[]`. A rule needs at least one source, which can also
+be one of the kinds in the next section.
+
+## Security group, prefix list and self sources
+
+Rules can also reference other security groups, managed prefix lists, or the
+group itself. These map one to one onto the inline `ingress`/`egress` block
+fields of `aws_security_group`:
+
+| Rule field        | Type           | Default | Meaning                                                    |
+|-------------------|----------------|---------|------------------------------------------------------------|
+| `security_groups` | `list(string)` | `[]`    | Security group IDs (`sg-...`, or `111122223333/sg-...` for a group in a peered VPC). |
+| `prefix_list_ids` | `list(string)` | `[]`    | Managed prefix list IDs (`pl-...`).                        |
+| `self`            | `bool`         | `false` | Allow traffic from (or to) members of this security group. |
+
+```hcl
+ingress_rules = [
+  {
+    description     = "PostgreSQL from the app tier"
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    security_groups = [module.app_sg.id]
+  },
+  {
+    description = "Replication between database nodes"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    self        = true
+  },
+]
+```
+
+Source kinds may be combined in one rule; the EC2 API accepts several in a
+single permission. The public exposure guard below only looks at CIDRs, so a
+guarded port opened to a security group, a prefix list or `self` is accepted.
+A prefix list can still contain `0.0.0.0/0`; the module cannot see its entries
+at plan time.
+
+Egress rules accept the same fields as destinations. An egress rule that omits
+`cidr_blocks` still falls back to `["0.0.0.0/0"]`, as it always has, unless it
+names a security group, a prefix list or `self`; then the fallback is `[]`, so
+"egress to the database group" does not quietly become "egress to the database
+group and the whole internet". Set `cidr_blocks` explicitly to get both.
 
 ## Public exposure guard
 
@@ -111,8 +155,8 @@ Declare every rule through `ingress_rules`/`egress_rules` instead.
 | `name`                         | Name of the security group.                                                          | `string`            | n/a                 |   yes    |
 | `description`                  | Description of the security group.                                                   | `string`            | `"Managed by Terraform"` |  no  |
 | `vpc_id`                       | ID of the VPC in which to create the security group.                                 | `string`            | n/a                 |   yes    |
-| `ingress_rules`                | List of ingress rules to apply. Each rule needs at least one entry across `cidr_blocks`/`ipv6_cidr_blocks`. | `list(object(...))` | `[]`                |    no    |
-| `egress_rules`                 | List of egress rules to apply.                                                       | `list(object(...))` | allow-all outbound  |    no    |
+| `ingress_rules`                | List of ingress rules to apply. Each rule needs at least one source across `cidr_blocks`, `ipv6_cidr_blocks`, `security_groups`, `prefix_list_ids` or `self`. | `list(object(...))` | `[]`                |    no    |
+| `egress_rules`                 | List of egress rules to apply. Destinations use the same fields as ingress sources. | `list(object(...))` | allow-all outbound  |    no    |
 | `guarded_ingress_ports`        | Ports that may not be opened to a `/0` CIDR without an opt-in. `[]` disables the guard. | `list(number)`   | see above           |    no    |
 | `allow_public_guarded_ingress` | Accept exposure of a guarded port to an unrestricted CIDR.                           | `bool`              | `false`             |    no    |
 | `tags`                         | Tags applied to the security group.                                                  | `map(string)`       | `{}`                |    no    |
