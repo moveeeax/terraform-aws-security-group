@@ -7,6 +7,18 @@ locals {
   # Protocol values that mean "every protocol on every port".
   all_protocols = ["-1", "all"]
 
+  # Resolve the egress cidr_blocks fallback. An omitted cidr_blocks used to mean
+  # ["0.0.0.0/0"] unconditionally, and still does for rules that only use CIDRs,
+  # so existing configurations plan exactly as before. A rule that targets a
+  # security group, a prefix list or self falls back to [] instead.
+  egress_rules = [
+    for rule in var.egress_rules : merge(rule, {
+      cidr_blocks = rule.cidr_blocks != null ? rule.cidr_blocks : (
+        rule.self || length(rule.security_groups) + length(rule.prefix_list_ids) > 0 ? [] : ["0.0.0.0/0"]
+      )
+    })
+  ]
+
   # Ingress rules that would open a guarded port to the entire internet. A CIDR
   # with a /0 prefix (0.0.0.0/0, ::/0) covers every address, so it is the marker
   # for "unrestricted". Both IPv4 (cidr_blocks) and IPv6 (ipv6_cidr_blocks)
@@ -38,11 +50,14 @@ resource "aws_security_group" "this" {
       protocol         = ingress.value.protocol
       cidr_blocks      = ingress.value.cidr_blocks
       ipv6_cidr_blocks = ingress.value.ipv6_cidr_blocks
+      security_groups  = ingress.value.security_groups
+      prefix_list_ids  = ingress.value.prefix_list_ids
+      self             = ingress.value.self
     }
   }
 
   dynamic "egress" {
-    for_each = var.egress_rules
+    for_each = local.egress_rules
     content {
       description      = egress.value.description
       from_port        = egress.value.from_port
@@ -50,6 +65,9 @@ resource "aws_security_group" "this" {
       protocol         = egress.value.protocol
       cidr_blocks      = egress.value.cidr_blocks
       ipv6_cidr_blocks = egress.value.ipv6_cidr_blocks
+      security_groups  = egress.value.security_groups
+      prefix_list_ids  = egress.value.prefix_list_ids
+      self             = egress.value.self
     }
   }
 

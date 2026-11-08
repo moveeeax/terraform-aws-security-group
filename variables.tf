@@ -15,7 +15,14 @@ variable "vpc_id" {
 }
 
 variable "ingress_rules" {
-  description = "List of ingress rules to apply to the security group. Defaults to no ingress at all."
+  description = <<-EOT
+    List of ingress rules to apply to the security group. Defaults to no ingress at all.
+
+    Each rule needs at least one source. Sources can be IPv4 CIDRs (cidr_blocks),
+    IPv6 CIDRs (ipv6_cidr_blocks), other security groups by ID (security_groups),
+    managed prefix lists by ID (prefix_list_ids), or the group itself (self = true).
+    Several source kinds may be combined in one rule.
+  EOT
   type = list(object({
     description      = optional(string, "")
     from_port        = number
@@ -23,12 +30,32 @@ variable "ingress_rules" {
     protocol         = string
     cidr_blocks      = optional(list(string), [])
     ipv6_cidr_blocks = optional(list(string), [])
+    security_groups  = optional(list(string), [])
+    prefix_list_ids  = optional(list(string), [])
+    self             = optional(bool, false)
   }))
   default = []
 
   validation {
-    condition     = alltrue([for rule in var.ingress_rules : length(rule.cidr_blocks) + length(rule.ipv6_cidr_blocks) > 0])
-    error_message = "Every ingress rule must list at least one entry in cidr_blocks or ipv6_cidr_blocks; this module exposes no other source type, and a rule without a source is rejected by the EC2 API."
+    condition = alltrue([
+      for rule in var.ingress_rules :
+      rule.self || length(rule.cidr_blocks) + length(rule.ipv6_cidr_blocks) + length(rule.security_groups) + length(rule.prefix_list_ids) > 0
+    ])
+    error_message = "Every ingress rule needs a source: at least one entry in cidr_blocks, ipv6_cidr_blocks, security_groups or prefix_list_ids, or self = true. A rule without a source is rejected by the EC2 API."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for rule in var.ingress_rules : [for id in rule.security_groups : can(regex("^([0-9]{12}/)?sg-[0-9a-f]+$", id))]
+    ]))
+    error_message = "Every entry in an ingress rule's security_groups must be a security group ID such as sg-0123456789abcdef0, optionally prefixed with the owning account ID (111122223333/sg-0123456789abcdef0) for a group in a peered VPC."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for rule in var.ingress_rules : [for id in rule.prefix_list_ids : can(regex("^pl-[0-9a-f]+$", id))]
+    ]))
+    error_message = "Every entry in an ingress rule's prefix_list_ids must be a managed prefix list ID such as pl-0123456789abcdef0."
   }
 
   # Only TCP and UDP rules carry real port numbers. For icmp/icmpv6 these fields
@@ -44,14 +71,23 @@ variable "ingress_rules" {
 }
 
 variable "egress_rules" {
-  description = "List of egress rules to apply to the security group. Defaults to allowing all outbound traffic, matching the behaviour of a security group created outside this module. Pass an explicit list to restrict it, or [] to allow no egress at all."
+  description = <<-EOT
+    List of egress rules to apply to the security group. Defaults to allowing all outbound traffic, matching the behaviour of a security group created outside this module. Pass an explicit list to restrict it, or [] to allow no egress at all.
+
+    Destinations work like ingress sources: cidr_blocks, ipv6_cidr_blocks, security_groups, prefix_list_ids and self.
+    When cidr_blocks is omitted it falls back to ["0.0.0.0/0"], as before, unless the rule names a security group,
+    a prefix list or self; then it falls back to [] so the rule does not also open egress to the whole internet.
+  EOT
   type = list(object({
     description      = optional(string, "")
     from_port        = number
     to_port          = number
     protocol         = string
-    cidr_blocks      = optional(list(string), ["0.0.0.0/0"])
+    cidr_blocks      = optional(list(string))
     ipv6_cidr_blocks = optional(list(string), [])
+    security_groups  = optional(list(string), [])
+    prefix_list_ids  = optional(list(string), [])
+    self             = optional(bool, false)
   }))
   default = [{
     description = "Allow all outbound traffic"
@@ -61,9 +97,28 @@ variable "egress_rules" {
     cidr_blocks = ["0.0.0.0/0"]
   }]
 
+  # An omitted cidr_blocks always resolves to a destination (["0.0.0.0/0"] or
+  # another kind the rule names), so only an explicit list can leave a rule empty.
   validation {
-    condition     = alltrue([for rule in var.egress_rules : length(rule.cidr_blocks) + length(rule.ipv6_cidr_blocks) > 0])
-    error_message = "Every egress rule must list at least one entry in cidr_blocks or ipv6_cidr_blocks; this module exposes no other destination type, and a rule without a destination is rejected by the EC2 API."
+    condition = alltrue([
+      for rule in var.egress_rules :
+      rule.cidr_blocks == null || rule.self || length(coalesce(rule.cidr_blocks, [])) + length(rule.ipv6_cidr_blocks) + length(rule.security_groups) + length(rule.prefix_list_ids) > 0
+    ])
+    error_message = "Every egress rule needs a destination: at least one entry in cidr_blocks, ipv6_cidr_blocks, security_groups or prefix_list_ids, or self = true. A rule without a destination is rejected by the EC2 API."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for rule in var.egress_rules : [for id in rule.security_groups : can(regex("^([0-9]{12}/)?sg-[0-9a-f]+$", id))]
+    ]))
+    error_message = "Every entry in an egress rule's security_groups must be a security group ID such as sg-0123456789abcdef0, optionally prefixed with the owning account ID (111122223333/sg-0123456789abcdef0) for a group in a peered VPC."
+  }
+
+  validation {
+    condition = alltrue(flatten([
+      for rule in var.egress_rules : [for id in rule.prefix_list_ids : can(regex("^pl-[0-9a-f]+$", id))]
+    ]))
+    error_message = "Every entry in an egress rule's prefix_list_ids must be a managed prefix list ID such as pl-0123456789abcdef0."
   }
 
   validation {
